@@ -18,6 +18,12 @@ export type Object = {
   url: string;
 };
 
+export type FolderSize = {
+  prefix: string;
+  size: number;
+  objects: number;
+};
+
 export type PutObjectPayload = {
   key: string;
   file: File | null;

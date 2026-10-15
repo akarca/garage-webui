@@ -80,6 +80,71 @@ func (b *Browse) GetObjects(w http.ResponseWriter, r *http.Request) {
 	utils.ResponseSuccess(w, result)
 }
 
+const folderSizeCacheTTL = time.Hour
+
+func folderSizeCacheKey(bucket string, prefix string) string {
+	return fmt.Sprintf("foldersize:%s:%s", bucket, prefix)
+}
+
+// Drops cached sizes of every folder containing key, and of key's own
+// subfolders when key is a directory.
+func invalidateFolderSizes(bucket string, key string) {
+	for i, c := range key {
+		if c == '/' {
+			utils.Cache.Delete(folderSizeCacheKey(bucket, key[:i+1]))
+		}
+	}
+	if strings.HasSuffix(key, "/") {
+		utils.Cache.DeletePrefix(folderSizeCacheKey(bucket, key))
+	}
+}
+
+func (b *Browse) GetFolderSize(w http.ResponseWriter, r *http.Request) {
+	bucket := r.PathValue("bucket")
+	prefix := r.PathValue("prefix")
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	cacheKey := folderSizeCacheKey(bucket, prefix)
+	if cached := utils.Cache.Get(cacheKey); cached != nil {
+		utils.ResponseSuccess(w, cached)
+		return
+	}
+
+	client, err := getS3Client(bucket)
+	if err != nil {
+		utils.ResponseError(w, err)
+		return
+	}
+
+	result := schema.FolderSizeResult{Prefix: prefix}
+	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		// Not tied to the request, so a slow scan still ends up cached even
+		// if the client gives up waiting.
+		page, err := paginator.NextPage(context.Background())
+		if err != nil {
+			utils.ResponseError(w, err)
+			return
+		}
+
+		for _, object := range page.Contents {
+			if object.Size != nil {
+				result.Size += *object.Size
+			}
+			result.Objects++
+		}
+	}
+
+	utils.Cache.Set(cacheKey, result, folderSizeCacheTTL)
+	utils.ResponseSuccess(w, result)
+}
+
 func (b *Browse) GetOneObject(w http.ResponseWriter, r *http.Request) {
 	bucket := r.PathValue("bucket")
 	key := r.PathValue("key")
@@ -211,6 +276,7 @@ func (b *Browse) PutObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	invalidateFolderSizes(bucket, key)
 	utils.ResponseSuccess(w, result)
 }
 
@@ -225,6 +291,8 @@ func (b *Browse) DeleteObject(w http.ResponseWriter, r *http.Request) {
 		utils.ResponseError(w, err)
 		return
 	}
+
+	defer invalidateFolderSizes(bucket, key)
 
 	// Delete directory and its content
 	if isDirectory && recursive {

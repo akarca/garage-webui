@@ -15,3 +15,9 @@ type BrowserObject struct {
 	Size         *int64     `json:"size"`
 	Url          string     `json:"url"`
 }
+
+type FolderSizeResult struct {
+	Prefix  string `json:"prefix"`
+	Size    int64  `json:"size"`
+	Objects int64  `json:"objects"`
+}

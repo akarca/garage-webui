@@ -5,6 +5,7 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import {
+  FolderSize,
   GetObjectsResult,
   PutObjectPayload,
   UseBrowserObjectOptions,
@@ -18,6 +19,14 @@ export const useBrowseObjects = (
     queryKey: ["browse", bucket, options],
     queryFn: () =>
       api.get<GetObjectsResult>(`/browse/${bucket}`, { params: options }),
+  });
+};
+
+export const useFolderSize = (bucket: string, prefix: string) => {
+  return useQuery({
+    queryKey: ["browse", bucket, "size", prefix],
+    queryFn: () => api.get<FolderSize>(`/browse-size/${bucket}/${prefix}`),
+    staleTime: 60 * 60 * 1000,
   });
 };
 

@@ -1,5 +1,5 @@
 import { Alert, Checkbox, Loading, Table } from "react-daisyui";
-import { useBrowseObjects, useDeleteObject } from "./hooks";
+import { useBrowseObjects, useDeleteObject, useFolderSize } from "./hooks";
 import { dayjs, handleError, readableBytes } from "@/lib/utils";
 import mime from "mime/lite";
 import { Object } from "./types";
@@ -186,7 +186,8 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
                     .pop()}
                 </span>
               </td>
-              <td colSpan={2} />
+              <FolderSizeCell bucket={bucketName} prefix={prefix} />
+              <td />
               <ObjectActions object={{ objectKey: prefix, url: "" }} />
             </tr>
           ))}
@@ -245,6 +246,30 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
 
       <GotoTopButton />
     </div>
+  );
+};
+
+type FolderSizeCellProps = {
+  bucket: string;
+  prefix: string;
+};
+
+const FolderSizeCell = ({ bucket, prefix }: FolderSizeCellProps) => {
+  const { data, isLoading } = useFolderSize(bucket, prefix);
+
+  return (
+    <td
+      className="whitespace-nowrap"
+      title={data ? `${data.objects} object(s)` : undefined}
+    >
+      {isLoading ? (
+        <Loading size="xs" className="opacity-50" />
+      ) : data ? (
+        readableBytes(data.size)
+      ) : (
+        "-"
+      )}
+    </td>
   );
 };
 
