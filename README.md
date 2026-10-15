@@ -12,6 +12,8 @@ A simple admin web UI for [Garage](https://garagehq.deuxfleurs.fr/), a self-host
 - Cluster & layout management
 - Create, update, or view bucket information
 - Integrated objects/bucket browser
+  - Select multiple files and folders and delete them at once
+  - Folder sizes and object counts (cached for 1 hour, refreshed when objects are uploaded or deleted through the UI)
 - Create & assign access keys
 
 ## Installation
