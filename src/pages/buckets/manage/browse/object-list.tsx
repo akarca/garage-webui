@@ -1,6 +1,6 @@
-import { Alert, Loading, Table } from "react-daisyui";
-import { useBrowseObjects } from "./hooks";
-import { dayjs, readableBytes } from "@/lib/utils";
+import { Alert, Checkbox, Loading, Table } from "react-daisyui";
+import { useBrowseObjects, useDeleteObject } from "./hooks";
+import { dayjs, handleError, readableBytes } from "@/lib/utils";
 import mime from "mime/lite";
 import { Object } from "./types";
 import { API_URL } from "@/lib/api";
@@ -10,10 +10,15 @@ import {
   FileIcon,
   FileType,
   Folder,
+  Trash,
 } from "lucide-react";
 import { useBucketContext } from "../context";
 import ObjectActions from "./object-actions";
 import GotoTopButton from "@/components/ui/goto-top-btn";
+import Button from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 type Props = {
   prefix?: string;
@@ -26,6 +31,67 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
     prefix,
     limit: 1000,
   });
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const deleteObject = useDeleteObject(bucketName);
+
+  const allKeys = useMemo(
+    () => [
+      ...(data?.prefixes || []),
+      ...(data?.objects || []).map((o) => data!.prefix + o.objectKey),
+    ],
+    [data]
+  );
+  const selectedKeys = allKeys.filter((key) => selected.has(key));
+  const isAllSelected =
+    allKeys.length > 0 && selectedKeys.length === allKeys.length;
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [prefix]);
+
+  const toggleSelect = (key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(isAllSelected ? new Set() : new Set(allKeys));
+  };
+
+  const onDeleteSelected = async () => {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete ${selectedKeys.length} selected item(s)? Selected directories will be deleted with their content.`
+      )
+    ) {
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      selectedKeys.map((key) =>
+        deleteObject.mutateAsync({ key, recursive: key.endsWith("/") })
+      )
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+
+    if (failed.length) {
+      handleError((failed[0] as PromiseRejectedResult).reason);
+    }
+    if (failed.length < results.length) {
+      toast.success(`${results.length - failed.length} item(s) deleted!`);
+    }
+
+    setSelected(new Set());
+    queryClient.invalidateQueries({ queryKey: ["browse", bucketName] });
+  };
 
   const onObjectClick = (object: Object) => {
     window.open(API_URL + object.url + "?view=1", "_blank");
@@ -33,8 +99,37 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
 
   return (
     <div className="overflow-x-auto min-h-[400px]">
+      {selectedKeys.length > 0 && (
+        <div className="flex items-center justify-between gap-2 px-4 py-2 bg-base-200">
+          <span className="text-sm">{selectedKeys.length} selected</span>
+          <Button
+            icon={Trash}
+            color="error"
+            size="sm"
+            onClick={onDeleteSelected}
+            loading={deleteObject.isPending}
+            disabled={deleteObject.isPending}
+          >
+            Delete Selected
+          </Button>
+        </div>
+      )}
+
       <Table>
         <Table.Head>
+          <Checkbox
+            size="sm"
+            className="align-middle"
+            checked={isAllSelected}
+            ref={(el) => {
+              if (el) {
+                el.indeterminate = selectedKeys.length > 0 && !isAllSelected;
+              }
+            }}
+            disabled={!allKeys.length}
+            onChange={toggleSelectAll}
+            aria-label="Select all"
+          />
           <span>Name</span>
           <span>Size</span>
           <span>Last Modified</span>
@@ -43,7 +138,7 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
         <Table.Body>
           {isLoading ? (
             <tr>
-              <td colSpan={3}>
+              <td colSpan={5}>
                 <div className="h-[320px] flex items-center justify-center">
                   <Loading />
                 </div>
@@ -51,7 +146,7 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
             </tr>
           ) : error ? (
             <tr>
-              <td colSpan={3}>
+              <td colSpan={5}>
                 <Alert status="error" icon={<CircleXIcon />}>
                   <span>{error.message}</span>
                 </Alert>
@@ -59,7 +154,7 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
             </tr>
           ) : !data?.prefixes?.length && !data?.objects?.length ? (
             <tr>
-              <td className="text-center py-16" colSpan={3}>
+              <td className="text-center py-16" colSpan={5}>
                 No objects
               </td>
             </tr>
@@ -70,6 +165,14 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
               key={prefix}
               className="hover:bg-neutral/60 hover:text-neutral-content group"
             >
+              <td className="w-0">
+                <Checkbox
+                  size="sm"
+                  className="align-middle"
+                  checked={selected.has(prefix)}
+                  onChange={() => toggleSelect(prefix)}
+                />
+              </td>
               <td
                 className="cursor-pointer"
                 role="button"
@@ -95,12 +198,21 @@ const ObjectList = ({ prefix, onPrefixChange }: Props) => {
                 ? object.objectKey.substring(0, extIdx)
                 : object.objectKey;
             const ext = extIdx >= 0 ? object.objectKey.substring(extIdx) : null;
+            const key = data.prefix + object.objectKey;
 
             return (
               <tr
                 key={object.objectKey}
                 className="hover:bg-neutral/60 hover:text-neutral-content group"
               >
+                <td className="w-0">
+                  <Checkbox
+                    size="sm"
+                    className="align-middle"
+                    checked={selected.has(key)}
+                    onChange={() => toggleSelect(key)}
+                  />
+                </td>
                 <td
                   className="cursor-pointer"
                   role="button"
